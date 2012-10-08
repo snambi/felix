@@ -29,6 +29,7 @@ import java.lang.reflect.Array;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Calendar;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Enumeration;
@@ -204,6 +205,8 @@ public class BundlePlugin extends AbstractMojo
      * @readonly
      */
     private MavenSession m_mavenSession;
+    
+    protected boolean parallel;
 
     private static final String MAVEN_SYMBOLICNAME = "maven-symbolicname";
     private static final String MAVEN_RESOURCES = "{maven-resources}";
@@ -241,6 +244,7 @@ public class BundlePlugin extends AbstractMojo
      */
     public void execute() throws MojoExecutionException
     {
+    	long t1 = Calendar.getInstance().getTimeInMillis();
         Properties properties = new Properties();
         String projectType = getProject().getArtifact().getType();
 
@@ -253,6 +257,9 @@ public class BundlePlugin extends AbstractMojo
         }
 
         execute( getProject(), instructions, properties );
+        long t2 = Calendar.getInstance().getTimeInMillis();
+        
+        System.out.println("execute time : " + (t2-t1));
     }
 
 
@@ -414,8 +421,11 @@ public class BundlePlugin extends AbstractMojo
     }
 
 
-    protected Builder getOSGiBuilder( MavenProject currentProject, Map originalInstructions, Properties properties,
-        Jar[] classpath ) throws Exception
+    protected Builder getOSGiBuilder( MavenProject currentProject, 
+    									Map originalInstructions, 
+    									Properties properties,
+    									Jar[] classpath) 
+    											throws Exception
     {
         properties.putAll( getDefaultProperties( currentProject ) );
         properties.putAll( transformDirectives( originalInstructions ) );
@@ -1232,7 +1242,17 @@ public class BundlePlugin extends AbstractMojo
     }
 
 
-    protected void setOutputDirectory( File _outputDirectory )
+    public boolean isParallel() {
+		return parallel;
+	}
+
+
+	public void setParallel(boolean parallel) {
+		this.parallel = parallel;
+	}
+
+
+	protected void setOutputDirectory( File _outputDirectory )
     {
         outputDirectory = _outputDirectory;
     }

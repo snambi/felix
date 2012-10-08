@@ -19,31 +19,63 @@ package aQute.bnd.osgi;
  * 
  * Any headers in the given properties are used in the output properties.
  */
-import static aQute.libg.generics.Create.*;
+import static aQute.libg.generics.Create.list;
+import static aQute.libg.generics.Create.map;
 
-import java.io.*;
-import java.net.*;
-import java.util.*;
+import java.io.File;
+import java.io.FileNotFoundException;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.PrintStream;
+import java.net.URL;
+import java.net.URLConnection;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Calendar;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Enumeration;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Hashtable;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
 import java.util.Map.Entry;
-import java.util.jar.*;
+import java.util.Properties;
+import java.util.Set;
+import java.util.SortedSet;
+import java.util.TreeSet;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.jar.Attributes;
 import java.util.jar.Attributes.Name;
-import java.util.regex.*;
+import java.util.jar.Manifest;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
-import aQute.bnd.annotation.*;
-import aQute.bnd.header.*;
+import org.apache.maven.plugin.MojoExecutionException;
+
+import aQute.bnd.annotation.Export;
+import aQute.bnd.annotation.ProviderType;
+import aQute.bnd.header.Attrs;
+import aQute.bnd.header.OSGiHeader;
+import aQute.bnd.header.Parameters;
 import aQute.bnd.osgi.Descriptors.Descriptor;
 import aQute.bnd.osgi.Descriptors.PackageRef;
 import aQute.bnd.osgi.Descriptors.TypeRef;
-import aQute.bnd.service.*;
+import aQute.bnd.service.AnalyzerPlugin;
 import aQute.bnd.version.Version;
-import aQute.lib.base64.*;
-import aQute.lib.collections.*;
-import aQute.lib.filter.*;
-import aQute.lib.hex.*;
-import aQute.lib.io.*;
-import aQute.libg.cryptography.*;
-import aQute.libg.generics.*;
-import aQute.libg.reporter.*;
+import aQute.lib.base64.Base64;
+import aQute.lib.collections.MultiMap;
+import aQute.lib.filter.Filter;
+import aQute.lib.hex.Hex;
+import aQute.lib.io.IO;
+import aQute.libg.cryptography.Digester;
+import aQute.libg.cryptography.MD5;
+import aQute.libg.cryptography.SHA1;
+import aQute.libg.generics.Create;
+import aQute.libg.reporter.ReporterMessages;
 
 public class Analyzer extends Processor {
 	private final SortedSet<Clazz.JAVA>				ees						= new TreeSet<Clazz.JAVA>();
@@ -72,6 +104,7 @@ public class Analyzer extends Processor {
 	private boolean									analyzed				= false;
 	private boolean									diagnostics				= false;
 	private boolean									inited					= false;
+	private boolean 								isParallel              = false;
 	final protected AnalyzerMessages				msgs					= ReporterMessages.base(this,
 																					AnalyzerMessages.class);
 
@@ -124,20 +157,32 @@ public class Analyzer extends Processor {
 
 			// Parse all the class in the
 			// the jar according to the OSGi bcp
+			
+			// FIXME: bcp time
+			long a1 = Calendar.getInstance().getTimeInMillis();
 			analyzeBundleClasspath();
+			long a2 = Calendar.getInstance().getTimeInMillis();
+			System.out.println("analyze:analyze bcp " + (a2-a1));
 
+			
+			// FIXME: class version time
+			long c1 = Calendar.getInstance().getTimeInMillis();
 			//
 			// calculate class versions in use
 			//
 			for (Clazz c : classspace.values()) {
 				ees.add(c.getFormat());
 			}
-
+			long c2 = Calendar.getInstance().getTimeInMillis();
+			System.out.println("analyze: class versions " + (c2-c1));
+			
+			
+			// FIXME: time get export packages
+			long b1 = Calendar.getInstance().getTimeInMillis();
 			//
 			// Get exported packages from the
 			// entries on the classpath
 			//
-
 			for (Jar current : getClasspath()) {
 				getExternalExports(current, classpathExports);
 				for (String dir : current.getDirectories().keySet()) {
@@ -146,6 +191,8 @@ public class Analyzer extends Processor {
 					getExportVersionsFromPackageInfo(packageRef, resource, classpathExports);
 				}
 			}
+			long b2 = Calendar.getInstance().getTimeInMillis();
+			System.out.println("analyze:export pkg " + (b2-b1));
 
 			// Handle the bundle activator
 
@@ -156,19 +203,30 @@ public class Analyzer extends Processor {
 				trace("activator %s %s", s, activator);
 			}
 
+			// FIXME: time execute plugins
+			long p1 = Calendar.getInstance().getTimeInMillis();
 			// Execute any plugins
 			// TODO handle better reanalyze
 			doPlugins();
+			long p2 = Calendar.getInstance().getTimeInMillis();
+			System.out.println("analyze:execute plugins " + ( p2-p1));
 
+			// FIXME: time jar extra
+			long tr1 = Calendar.getInstance().getTimeInMillis();
 			Jar extra = getExtra();
 			while (extra != null) {
 				dot.addAll(extra);
 				analyzeJar(extra, "", true);
 				extra = getExtra();
 			}
+			long tr2 = Calendar.getInstance().getTimeInMillis();
+			System.out.println("analyze: jar extra " + (tr2-tr1));
 
 			referred.keySet().removeAll(contained.keySet());
 
+			
+			// FIXME: time exports
+			long e1 = Calendar.getInstance().getTimeInMillis();			
 			//
 			// EXPORTS
 			//
@@ -188,7 +246,12 @@ public class Analyzer extends Processor {
 				// exports. I.e. look on the classpath
 				augmentExports(exports);
 			}
+			
+			long e2 = Calendar.getInstance().getTimeInMillis();
+			System.out.println("analyze:time exports " + (e2-e1));
 
+			// FIXME: time imports
+			long i1 = Calendar.getInstance().getTimeInMillis();
 			//
 			// IMPORTS
 			// Imports MUST come after exports because we use information from
@@ -228,7 +291,13 @@ public class Analyzer extends Processor {
 				// imports. I.e. look in the exports
 				augmentImports(imports, exports);
 			}
+			
+			long i2 = Calendar.getInstance().getTimeInMillis();
+			System.out.println("analyze:time imports " + (i2-i1));
 
+			
+			// FIXME: time uses
+			long u1 = Calendar.getInstance().getTimeInMillis();			
 			//
 			// USES
 			//
@@ -238,7 +307,12 @@ public class Analyzer extends Processor {
 																	// lets see
 
 			doUses(exports, api ? apiUses : uses, imports);
+			long u2 = Calendar.getInstance().getTimeInMillis();	
+			System.out.println("analyze:time uses " + (u2-u1));
 
+			
+			// FIXME: time privates
+			long pr1 = Calendar.getInstance().getTimeInMillis();
 			//
 			// Verify that no exported package has a reference to a private
 			// package
@@ -266,7 +340,12 @@ public class Analyzer extends Processor {
 						msgs.Export_Has_PrivateReferences_(exported, privateReferences.size(), privateReferences);
 				}
 			}
+			long pr2 = Calendar.getInstance().getTimeInMillis();
+			System.out.println("analyze: privates " + (pr2-pr1));
 
+			
+			// FIXME: time checks
+			long ck1 = Calendar.getInstance().getTimeInMillis();
 			//
 			// Checks
 			//
@@ -277,6 +356,8 @@ public class Analyzer extends Processor {
 						+ "The following package(s) import from the default package "
 						+ uses.transpose().get(Descriptors.DEFAULT_PACKAGE));
 			}
+			long ck2 = Calendar.getInstance().getTimeInMillis();
+			System.out.println("analyze:check " + (ck2-ck1));
 
 		}
 	}
@@ -305,6 +386,7 @@ public class Analyzer extends Processor {
 	 */
 	void doPlugins() {
 		for (AnalyzerPlugin plugin : getPlugins(AnalyzerPlugin.class)) {
+			long t1 = Calendar.getInstance().getTimeInMillis();
 			try {
 				Processor previous = beginHandleErrors(plugin.toString());
 				boolean reanalyze = plugin.analyzeJar(this);
@@ -317,6 +399,8 @@ public class Analyzer extends Processor {
 			catch (Exception e) {
 				error("Analyzer Plugin %s failed %s", plugin, e);
 			}
+			long t2 = Calendar.getInstance().getTimeInMillis();
+			System.out.println("plugin : " + plugin.getClass().getName() + " time " + (t2-t1));
 		}
 	}
 
@@ -337,7 +421,13 @@ public class Analyzer extends Processor {
 	 */
 	public Manifest calcManifest() throws Exception {
 		try {
+			
+			// FIXME: remove later
+			long t1 = Calendar.getInstance().getTimeInMillis();
 			analyze();
+			long t2 = Calendar.getInstance().getTimeInMillis();
+			System.out.println("Analyze " + ( t2-t1 ));
+			
 			Manifest manifest = new Manifest();
 			Attributes main = manifest.getMainAttributes();
 
@@ -720,6 +810,14 @@ public class Analyzer extends Processor {
 			// Ignore
 		}
 		return 0;
+	}
+
+	public boolean isParallel() {
+		return isParallel;
+	}
+
+	public void setParallel(boolean isParallel) {
+		this.isParallel = isParallel;
 	}
 
 	public String getBndInfo(String key, String defaultValue) {
@@ -1628,11 +1726,21 @@ public class Analyzer extends Processor {
 		return dot;
 	}
 
+	// PERF : slow method
 	private void analyzeBundleClasspath() throws Exception {
 		Parameters bcp = getBundleClasspath();
 
 		if (bcp.isEmpty()) {
-			analyzeJar(dot, "", true);
+			
+			long begin = Calendar.getInstance().getTimeInMillis();
+			if( isParallel() == true){
+				analyzeJarInParallel(dot, "", true);
+			}else{
+				analyzeJar(dot, "", true);
+			}
+			long end = Calendar.getInstance().getTimeInMillis();
+			System.out.println("analyzeJar : " + (end-begin) );
+			
 		} else {
 			boolean okToIncludeDirs = true;
 
@@ -1686,7 +1794,228 @@ public class Analyzer extends Processor {
 
 		}
 	}
+	
 
+	
+	private boolean analyzeJarInParallel(Jar jar, String prefix, boolean okToIncludeDirs) throws Exception {
+		
+		// FIXME: analyzeJar in parallel time
+		long t1= Calendar.getInstance().getTimeInMillis();
+		
+		Map<String,Clazz> mismatched = new Hashtable<String,Clazz>();
+		
+		
+		/******  experimentation  *******/
+		// get the number of available cores
+		int cores = Runtime.getRuntime().availableProcessors();
+		
+		
+		
+		ExecutorService executor = Executors.newFixedThreadPool( cores );
+		List<String> resources = Arrays.asList( jar.getResources().keySet().toArray(new String[0]) );
+		
+		// atleast 10 files per thread
+		int files_per_thread  =0;
+		int number_of_threads =0;
+		
+		if( ( resources.size() / cores ) >=10 ){
+			files_per_thread = resources.size() / cores;
+			number_of_threads = cores;
+		}else{
+			number_of_threads = resources.size() /10;
+			files_per_thread = 10;
+		}
+		System.out.println("Available Cores : " + cores + ", thread : " + number_of_threads + ", files : " + files_per_thread );
+		
+		for(int i = 0; i < number_of_threads ; i++) {
+			
+			int fromIndex = i*files_per_thread;
+			int toIndex = (i+1) * files_per_thread;
+			if( (i+1) == number_of_threads){
+				toIndex = resources.size();
+			}
+			
+			List<String> sublist = resources.subList(fromIndex, toIndex);
+			Runnable worker = new ResourceReader(this, jar, prefix, okToIncludeDirs, sublist, mismatched);
+			
+			executor.execute(worker);
+	    }
+	   
+	    // This will make the executor accept no new threads
+	    // and finish all existing threads in the queue
+	    executor.shutdown();
+	    
+	    // Wait until all threads are finish
+	    while (!executor.isTerminated()) {
+	    }
+	    
+	    System.out.println("Finished all threads");
+	    long t2= Calendar.getInstance().getTimeInMillis();
+	    System.out.println("analyzeJarInParallel: time " + (t2-t1));
+	    /*************/
+	    
+		if (mismatched.size() > 0) {
+			error("Classes found in the wrong directory: %s", mismatched);
+			return false;
+		}
+		return true;
+	}
+	
+	public class ResourceReader implements Runnable{
+		
+		private Analyzer analyzer1;
+		private Jar jar;
+		private String prefix;
+		private boolean okToIncludeDirs;
+		private List<String> resources;
+		Map<String,Clazz> mismatched;
+		
+		public ResourceReader( Analyzer analyser,
+								Jar jar,
+								String prefix, 
+								boolean okToIncludeDirs, 
+								List<String> resources,
+								Map<String,Clazz> mismatched ){
+			
+			this.analyzer1 = analyser;
+			this.jar = jar;
+			this.prefix = prefix;
+			this.okToIncludeDirs = okToIncludeDirs;
+			this.resources = resources;
+			this.mismatched = mismatched;
+		}
+
+		public void run() {
+			
+			analyzer1.analyzeJarResources(resources, prefix, okToIncludeDirs, jar, mismatched);
+		}
+	}
+	
+	private void analyzeJarResources( List<String> resources, 
+											String prefix, 
+											boolean okToIncludeDirs, 
+											Jar jar,
+											Map<String,Clazz> mismatched ){
+		
+		//FIXME: measure time each thread takes
+		long t1 = Calendar.getInstance().getTimeInMillis();
+		
+		// PERF: something is not right
+		next: for (String path : resources) {
+			
+			//System.out.println("analyzing: " + path );
+			if (path.startsWith(prefix)) {
+
+				String relativePath = path.substring(prefix.length());
+
+				if (okToIncludeDirs) {
+					int n = relativePath.lastIndexOf('/');
+					
+					if (n < 0){
+						n = relativePath.length();
+					}
+					String relativeDir = relativePath.substring(0, n);
+
+					PackageRef packageRef = getPackageRef(relativeDir);
+					if (!packageRef.isMetaData() && !contained.containsKey(packageRef)) {
+						contained.put(packageRef);
+
+						// For each package we encounter for the first
+						// time. Unfortunately we can only do this once
+						// we found a class since the bcp has a tendency
+						// to overlap
+						if (!packageRef.isMetaData()) {
+							Resource pinfo = jar.getResource(prefix + packageRef.getPath() + "/packageinfo");
+							try {
+								getExportVersionsFromPackageInfo(packageRef, pinfo, classpathExports);
+							} catch (Exception e) {
+								// TODO Auto-generated catch block
+								e.printStackTrace();
+							}
+						}
+					}
+				}
+
+				// Check class resources, we need to analyze them
+				if (path.endsWith(".class")) {
+					Resource resource = jar.getResource(path);
+					Clazz clazz;
+					Attrs info = null;
+
+					try {
+						InputStream in = resource.openInputStream();
+						clazz = new Clazz(this, path, resource);
+						try {
+							// Check if we have a package-info
+							if (relativePath.endsWith("/package-info.class")) {
+								// package-info can contain an Export annotation
+								info = new Attrs();
+								parsePackageInfoClass(clazz, info);
+							} else {
+								
+								// PERF : slow method
+								// Otherwise we just parse it simply
+								clazz.parseClassFile();
+							}
+						}
+						finally {
+							in.close();
+						}
+					}
+					catch (Throwable e) {
+						error("Invalid class file %s (%s)", e, relativePath, e);
+						e.printStackTrace();
+						continue next;
+					}
+
+					String calculatedPath = clazz.getClassName().getPath();
+					if (!calculatedPath.equals(relativePath)) {
+						// If there is a mismatch we
+						// warning
+						if (okToIncludeDirs) // assume already reported
+							mismatched.put(clazz.getAbsolutePath(), clazz);
+					} else {
+						classspace.put(clazz.getClassName(), clazz);
+						PackageRef packageRef = clazz.getClassName().getPackageRef();
+
+						if (!contained.containsKey(packageRef)) {
+							contained.put(packageRef);
+							if (!packageRef.isMetaData()) {
+								Resource pinfo = jar.getResource(prefix + packageRef.getPath() + "/packageinfo");
+								try {
+									getExportVersionsFromPackageInfo(packageRef, pinfo, classpathExports);
+								} catch (Exception e) {
+									// TODO Auto-generated catch block
+									e.printStackTrace();
+								}
+							}
+						}
+						if (info != null)
+							contained.merge(packageRef, false, info);
+
+						// Look at the referred packages
+						// and copy them to our baseline
+						Set<PackageRef> refs = Create.set();
+						for (PackageRef p : clazz.getReferred()) {
+							referred.put(p);
+							refs.add(p);
+							//System.out.println("referred pkg: " + p.getFQN());
+						}
+						refs.remove(packageRef);
+						uses.addAll(packageRef, refs);
+
+						// Collect the API
+						apiUses.addAll(packageRef, clazz.getAPIUses());
+					}
+				}
+			}
+		}
+		
+		long t2 = Calendar.getInstance().getTimeInMillis();
+		System.out.println("analyzeJarResources: number of files " + resources.size() + ",  " + (t2-t1));
+		
+	}
+	
 	/**
 	 * We traverse through all the classes that we can find and calculate the
 	 * contained and referred set and uses. This method ignores the Bundle
@@ -1701,7 +2030,10 @@ public class Analyzer extends Processor {
 	private boolean analyzeJar(Jar jar, String prefix, boolean okToIncludeDirs) throws Exception {
 		Map<String,Clazz> mismatched = new HashMap<String,Clazz>();
 
+		// PERF: process this loop in parallel
 		next: for (String path : jar.getResources().keySet()) {
+			
+			//System.out.println("analyzing: " + path );
 			if (path.startsWith(prefix)) {
 
 				String relativePath = path.substring(prefix.length());
@@ -1743,6 +2075,8 @@ public class Analyzer extends Processor {
 								info = new Attrs();
 								parsePackageInfoClass(clazz, info);
 							} else {
+								
+								// PERF : slow method
 								// Otherwise we just parse it simply
 								clazz.parseClassFile();
 							}
@@ -1783,6 +2117,7 @@ public class Analyzer extends Processor {
 						for (PackageRef p : clazz.getReferred()) {
 							referred.put(p);
 							refs.add(p);
+							//System.out.println("referred pkg: " + p.getFQN());
 						}
 						refs.remove(packageRef);
 						uses.addAll(packageRef, refs);

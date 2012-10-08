@@ -359,7 +359,7 @@ public class BundleAllPlugin extends ManifestPlugin
                 //                    + " to the same file, try cleaning: " + outputFile );
             }
 
-            Analyzer analyzer = getAnalyzer( project, instructions, new Properties(), getClasspath( project ) );
+            Analyzer analyzer = getAnalyzer( project, instructions, new Properties(), getClasspath( project ), isParallel() );
 
             Jar osgiJar = new Jar( project.getArtifactId(), project.getArtifact().getFile() );
 

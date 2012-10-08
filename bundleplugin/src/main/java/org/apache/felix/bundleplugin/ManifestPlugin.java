@@ -24,6 +24,7 @@ import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.util.Calendar;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -64,9 +65,22 @@ public class ManifestPlugin extends BundlePlugin
         throws MojoExecutionException
     {
         Manifest manifest;
+        
+        // FIXME: time1
+    	long t1 = Calendar.getInstance().getTimeInMillis();
+    	
+    	String value = System.getProperty("bundle.isParallel");
+    	if( value != null && !value.trim().equals("")){
+    		if( value.toLowerCase().equals("true")){
+    			setParallel(true);
+    		}else{
+    			setParallel(false);
+    		}
+    	}
+    	
         try
         {
-            manifest = getManifest( project, instructions, properties, classpath );
+            manifest = getManifest( project, instructions, properties, classpath, isParallel() );
         }
         catch ( FileNotFoundException e )
         {
@@ -98,20 +112,35 @@ public class ManifestPlugin extends BundlePlugin
         {
             throw new MojoExecutionException( "Error trying to write Manifest to file " + outputFile, e );
         }
+        
+        // FIXME: time2
+    	long t2 = Calendar.getInstance().getTimeInMillis();
+    	System.out.println("manifest.execute() " + (t2-t1) );
     }
 
 
-    public Manifest getManifest( MavenProject project, Jar[] classpath ) throws IOException, MojoFailureException,
-        MojoExecutionException, Exception
+    public Manifest getManifest( MavenProject project, 
+    								Jar[] classpath, 
+    								boolean isParallel 
+    							) 
+    									throws IOException, MojoFailureException,MojoExecutionException, Exception
     {
-        return getManifest( project, new LinkedHashMap(), new Properties(), classpath );
+        return getManifest( project, new LinkedHashMap(), new Properties(), classpath , isParallel );
     }
 
 
-    public Manifest getManifest( MavenProject project, Map instructions, Properties properties, Jar[] classpath )
-        throws IOException, MojoFailureException, MojoExecutionException, Exception
+    public Manifest getManifest( MavenProject project, 
+    								Map instructions, 
+    								Properties properties, 
+    								Jar[] classpath, 
+    								boolean isParallel )
+    										throws IOException, MojoFailureException, MojoExecutionException, Exception
     {
-        Analyzer analyzer = getAnalyzer( project, instructions, properties, classpath );
+    	
+    	// FIXME: time1
+    	long t1 = Calendar.getInstance().getTimeInMillis();
+        
+    	Analyzer analyzer = getAnalyzer( project, instructions, properties, classpath, isParallel );
         boolean hasErrors = reportErrors( "Manifest " + project.getArtifact(), analyzer );
         if ( hasErrors )
         {
@@ -144,23 +173,45 @@ public class ManifestPlugin extends BundlePlugin
 
         // cleanup...
         analyzer.close();
+        
+        // FIXME: time2
+        long t2 = Calendar.getInstance().getTimeInMillis();
+        System.out.println("getManifest " + ( t2-t1 ));
 
         return manifest;
     }
 
 
-    protected Analyzer getAnalyzer( MavenProject project, Jar[] classpath ) throws IOException, MojoExecutionException,
+    protected Analyzer getAnalyzer( MavenProject project, Jar[] classpath, boolean isParallel ) throws IOException, MojoExecutionException,
         Exception
     {
-        return getAnalyzer( project, new LinkedHashMap(), new Properties(), classpath );
+        return getAnalyzer( project, new LinkedHashMap(), new Properties(), classpath, isParallel );
     }
 
 
-    protected Analyzer getAnalyzer( MavenProject project, Map instructions, Properties properties, Jar[] classpath )
-        throws IOException, MojoExecutionException, Exception
+    /**
+     * Generates and merges the Manifest.MF file.
+     * 
+     * @param project
+     * @param instructions
+     * @param properties
+     * @param classpath
+     * @param isParallel
+     * @return
+     * @throws IOException
+     * @throws MojoExecutionException
+     * @throws Exception
+     */
+    protected Analyzer getAnalyzer( MavenProject project, 
+    								Map instructions, 
+    								Properties properties, 
+    								Jar[] classpath,
+    								boolean isParallel)
+    										throws IOException, MojoExecutionException, Exception
     {
         if ( rebuildBundle && supportedProjectTypes.contains( project.getArtifact().getType() ) )
         {
+        	// TODO: enable parallelization
             return buildOSGiBundle( project, instructions, properties, classpath );
         }
 
@@ -182,9 +233,10 @@ public class ManifestPlugin extends BundlePlugin
             }
         }
 
-        Builder analyzer = getOSGiBuilder( project, instructions, properties, classpath );
+        Builder osgibuilder = getOSGiBuilder( project, instructions, properties, classpath );
 
-        analyzer.setJar( file );
+        osgibuilder.setJar( file );
+        osgibuilder.setParallel(isParallel);
 
         // calculateExportsFromContents when we have no explicit instructions defining
         // the contents of the bundle *and* we are not analyzing the output directory,
@@ -192,30 +244,30 @@ public class ManifestPlugin extends BundlePlugin
 
         boolean isOutputDirectory = file.equals( getOutputDirectory() );
 
-        if ( analyzer.getProperty( Analyzer.EXPORT_PACKAGE ) == null
-            && analyzer.getProperty( Analyzer.EXPORT_CONTENTS ) == null
-            && analyzer.getProperty( Analyzer.PRIVATE_PACKAGE ) == null && !isOutputDirectory )
+        if ( osgibuilder.getProperty( Analyzer.EXPORT_PACKAGE ) == null
+            && osgibuilder.getProperty( Analyzer.EXPORT_CONTENTS ) == null
+            && osgibuilder.getProperty( Analyzer.PRIVATE_PACKAGE ) == null && !isOutputDirectory )
         {
-            String export = calculateExportsFromContents( analyzer.getJar() );
-            analyzer.setProperty( Analyzer.EXPORT_PACKAGE, export );
+            String export = calculateExportsFromContents( osgibuilder.getJar() );
+            osgibuilder.setProperty( Analyzer.EXPORT_PACKAGE, export );
         }
 
-        addMavenInstructions( project, analyzer );
+        addMavenInstructions( project, osgibuilder );
 
         // if we spot Embed-Dependency and the bundle is "target/classes", assume we need to rebuild
-        if ( analyzer.getProperty( DependencyEmbedder.EMBED_DEPENDENCY ) != null && isOutputDirectory )
+        if ( osgibuilder.getProperty( DependencyEmbedder.EMBED_DEPENDENCY ) != null && isOutputDirectory )
         {
-            analyzer.build();
+            osgibuilder.build();
         }
         else
         {
-            analyzer.mergeManifest( analyzer.getJar().getManifest() );
-            analyzer.getJar().setManifest( analyzer.calcManifest() );
+            osgibuilder.mergeManifest( osgibuilder.getJar().getManifest() );
+            osgibuilder.getJar().setManifest( osgibuilder.calcManifest() );
         }
 
-        mergeMavenManifest( project, analyzer );
+        mergeMavenManifest( project, osgibuilder );
 
-        return analyzer;
+        return osgibuilder;
     }
 
 
