@@ -206,7 +206,7 @@ public class BundlePlugin extends AbstractMojo
      */
     private MavenSession m_mavenSession;
     
-    protected boolean parallel;
+
 
     private static final String MAVEN_SYMBOLICNAME = "maven-symbolicname";
     private static final String MAVEN_RESOURCES = "{maven-resources}";
@@ -1242,14 +1242,7 @@ public class BundlePlugin extends AbstractMojo
     }
 
 
-    public boolean isParallel() {
-		return parallel;
-	}
 
-
-	public void setParallel(boolean parallel) {
-		this.parallel = parallel;
-	}
 
 
 	protected void setOutputDirectory( File _outputDirectory )

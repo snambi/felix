@@ -1825,7 +1825,10 @@ public class Analyzer extends Processor {
 			number_of_threads = resources.size() /10;
 			files_per_thread = 10;
 		}
-		System.out.println("Available Cores : " + cores + ", thread : " + number_of_threads + ", files : " + files_per_thread );
+		System.out.println("Available Cores : " + cores 
+								+ ", thread : " + number_of_threads 
+								+ ", files : " + files_per_thread 
+								+ ", total files: " + resources.size());
 		
 		for(int i = 0; i < number_of_threads ; i++) {
 			
@@ -1839,6 +1842,7 @@ public class Analyzer extends Processor {
 			Runnable worker = new ResourceReader(this, jar, prefix, okToIncludeDirs, sublist, mismatched);
 			
 			executor.execute(worker);
+			//Thread.sleep(1000);
 	    }
 	   
 	    // This will make the executor accept no new threads
@@ -1858,6 +1862,7 @@ public class Analyzer extends Processor {
 			error("Classes found in the wrong directory: %s", mismatched);
 			return false;
 		}
+		
 		return true;
 	}
 	

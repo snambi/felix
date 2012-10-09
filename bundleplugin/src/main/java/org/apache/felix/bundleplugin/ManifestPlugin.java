@@ -58,18 +58,56 @@ public class ManifestPlugin extends BundlePlugin
      * @parameter expression="${rebuildBundle}"
      */
     protected boolean rebuildBundle;
+    
+    /**
+     * Indicates whether to do slow performing actions in parallel.
+     * This is experimental, not fully implemented yet.
+     * 
+     * CLI use -Dmanifest.isParallel=true
+     * 
+     * @parameter expression="${parallel}" default-value="false"
+     */
+    protected boolean parallel = false;
+    
+    /**
+     * indicates whether to generate, force-generate or validate the manifest.
+     * Default mode is "Regenerate" since that is the current behavior.
+     * 
+     * CLI use -Dmanifest.mode=GENERATE,RE_GENERATE,VALIDATE
+     * 
+     * @parameter expression="${mode}" default-value="RE_GENERATE"
+     */
+    protected String mode = MODE_REGENERATE;
+    
+    
+    /**
+     * <ul>
+     * <li>GENERATE: Generate "manifest" if not found in the "manifestLocation"</li>
+     * <li>RE_GENERATE: Regenerate the "manifest", even if found in the "manifestLocation"</li>
+     * <li>VALIDATE: If the manifest is found, 
+     * <ol>
+     * 	<li>validate the "Import" packages with the classpath.</li>
+     * 	<li>validate whether "Export" packages are found in the bundle.</li>
+     * </ol>
+     * If the manifest is not found, fail.
+     * </li>
+     * </ul>
+     */
+    public static final String MODE_REGENERATE = "RE_GENERATE";
+    public static final String MODE_GENERATE = "GENERATE";
+    public static final String MODE_VALIDATE = "VALIDATE";
 
 
     @Override
     protected void execute( MavenProject project, Map instructions, Properties properties, Jar[] classpath )
         throws MojoExecutionException
     {
-        Manifest manifest;
+        
         
         // FIXME: time1
     	long t1 = Calendar.getInstance().getTimeInMillis();
     	
-    	String value = System.getProperty("bundle.isParallel");
+    	String value = System.getProperty("manifest.isParallel");
     	if( value != null && !value.trim().equals("")){
     		if( value.toLowerCase().equals("true")){
     			setParallel(true);
@@ -78,9 +116,54 @@ public class ManifestPlugin extends BundlePlugin
     		}
     	}
     	
+    	String mode = System.getProperty("manifest.mode");
+    	if( mode != null && !mode.trim().equals("") ){
+    		if( mode.toUpperCase().equals(MODE_GENERATE)){
+    			setMode(MODE_GENERATE);
+    		}else if( mode.toUpperCase().equals(MODE_REGENERATE)){
+    			setMode(MODE_REGENERATE);
+    		}else if( mode.toUpperCase().equals(MODE_VALIDATE)){
+    			setMode(MODE_VALIDATE);
+    		}
+    	}
+    	
+    	// execute based on the mode
+    	if( getMode().equals(MODE_GENERATE) ){
+    		
+    		// check whether the manifest exists in the expected location
+    		// if not, generate it
+    		File outputFile = new File( manifestLocation, "MANIFEST.MF" );
+    		if( outputFile.exists() && outputFile.canRead() ){
+    			// manifest exists, so exit
+    			System.out.println("Manifest exists at : "+ outputFile.getAbsolutePath() );
+    		}else{
+    			generateManifest(project, instructions, properties, classpath, isParallel() );
+    		}
+    	
+    	}else if( getMode().equals(MODE_REGENERATE) ){
+    	
+    		// whether it exists or not regenerate the manifest
+    		generateManifest(project, instructions, properties, classpath, isParallel() );
+    	
+    	}else if( getMode().equals(MODE_VALIDATE) ){
+    		// Validate the manifest entries
+    	}
+        
+        // FIXME: time2
+    	long t2 = Calendar.getInstance().getTimeInMillis();
+    	System.out.println("manifest.execute() " + (t2-t1) );
+    }
+    
+    public void generateManifest( MavenProject project, 
+    								Map instructions, 
+    								Properties properties, 
+    								Jar[] classpath, 
+    								boolean isParallel) throws MojoExecutionException{
+    	Manifest manifest;
+    	
         try
         {
-            manifest = getManifest( project, instructions, properties, classpath, isParallel() );
+            manifest = getManifest( project, instructions, properties, classpath, isParallel );
         }
         catch ( FileNotFoundException e )
         {
@@ -112,10 +195,6 @@ public class ManifestPlugin extends BundlePlugin
         {
             throw new MojoExecutionException( "Error trying to write Manifest to file " + outputFile, e );
         }
-        
-        // FIXME: time2
-    	long t2 = Calendar.getInstance().getTimeInMillis();
-    	System.out.println("manifest.execute() " + (t2-t1) );
     }
 
 
@@ -330,4 +409,21 @@ public class ManifestPlugin extends BundlePlugin
         }
         return sb.toString();
     }
+    
+    public boolean isParallel() {
+		return parallel;
+	}
+	public void setParallel(boolean parallel) {
+		this.parallel = parallel;
+	}
+
+
+	public String getMode() {
+		return mode;
+	}
+
+
+	public void setMode(String mode) {
+		this.mode = mode;
+	}
 }
