@@ -98,12 +98,8 @@ public class ManifestPlugin extends BundlePlugin
     public static final String MODE_VALIDATE = "VALIDATE";
 
 
-    @Override
-    protected void execute( MavenProject project, Map instructions, Properties properties, Jar[] classpath )
-        throws MojoExecutionException
-    {
-        
-        
+    public void execute() throws MojoExecutionException{
+    	
         // FIXME: time1
     	long t1 = Calendar.getInstance().getTimeInMillis();
     	
@@ -137,21 +133,28 @@ public class ManifestPlugin extends BundlePlugin
     			// manifest exists, so exit
     			System.out.println("Manifest exists at : "+ outputFile.getAbsolutePath() );
     		}else{
-    			generateManifest(project, instructions, properties, classpath, isParallel() );
+    			super.execute();
     		}
     	
     	}else if( getMode().equals(MODE_REGENERATE) ){
-    	
-    		// whether it exists or not regenerate the manifest
-    		generateManifest(project, instructions, properties, classpath, isParallel() );
+    		super.execute();
     	
     	}else if( getMode().equals(MODE_VALIDATE) ){
     		// Validate the manifest entries
+    		System.out.println("Validate is not yet implemented");
     	}
-        
-        // FIXME: time2
+
+    	// FIXME: time2
     	long t2 = Calendar.getInstance().getTimeInMillis();
     	System.out.println("manifest.execute() " + (t2-t1) );
+    }
+    
+    @Override
+    protected void execute( MavenProject project, Map instructions, Properties properties, Jar[] classpath )
+        throws MojoExecutionException
+    {
+          	
+    	generateManifest(project, instructions, properties, classpath, isParallel() );
     }
     
     public void generateManifest( MavenProject project, 
